@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run abidiff with the resolved arguments and capture its full report.
 # All configuration is provided via env vars set by action.yml.
+
 set -uo pipefail
 
 : "${BASE_LIB:?BASE_LIB must be set}"

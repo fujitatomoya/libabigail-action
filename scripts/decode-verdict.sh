@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Decode the abidiff exit-code bitmap into a verdict and decide whether the
 # job should fail given the configured fail-on policy.
+
 set -euo pipefail
 
 EXIT_CODE="${ABIDIFF_EXIT:-0}"
