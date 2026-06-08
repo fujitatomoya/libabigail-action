@@ -4,6 +4,6 @@ namespace libfoo {
 
 int add(int a, int b) { return a + b; }
 
-long multiply(int a, int b) { return static_cast<long>(a) * b; }
+int multiply(long a, long b) { return static_cast<int>(a * b); }
 
 }  // namespace libfoo
