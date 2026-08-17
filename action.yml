@@ -123,6 +123,7 @@ runs:
       env:
         ABIDIFF_EXIT: ${{ steps.run.outputs.abidiff-exit }}
         FAIL_ON: ${{ inputs.fail-on }}
+        REPORT_PATH: ${{ steps.run.outputs.report-path }}
       run: bash "$GITHUB_ACTION_PATH/scripts/decode-verdict.sh"
 
     - name: Upload abidiff report artifact
