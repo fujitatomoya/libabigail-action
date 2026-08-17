@@ -98,14 +98,18 @@ A complete, copy-pasteable template lives at [test/workflow.yml](test/workflow.y
 
 ## Verdict logic
 
-`abidiff` returns a bitmap; this action decodes it as:
+`abidiff` returns a bitmap, but the bitmap alone cannot classify every change: per `abidiff(1)`, `ABIDIFF_ABI_CHANGE` (bit 4) only means "the ABIs are different" — it is set for harmless additions *and* for modified declarations that libabigail flags as "possibly incompatible, needs human review" (e.g. a parameter or return type change on a symbol whose name is unchanged). `ABIDIFF_ABI_INCOMPATIBLE_CHANGE` (bit 8) is set only for *proven* incompatibilities (removed symbols, vtable changes, …). So the action decodes in two stages:
 
-| `abidiff` bits set | Verdict |
+| `abidiff` result | Verdict |
 |---|---|
-| `0` | `compatible` |
-| `ABIDIFF_ABI_CHANGE` only | `additions-only` |
+| exit `0` | `compatible` |
 | `ABIDIFF_ABI_INCOMPATIBLE_CHANGE` (with or without `ABI_CHANGE`) | `incompatible` |
+| `ABIDIFF_ABI_CHANGE` only, report summary shows any `Removed` or `Changed` declarations | `incompatible` |
+| `ABIDIFF_ABI_CHANGE` only, report summary shows only `Added` declarations | `additions-only` |
+| `ABIDIFF_ABI_CHANGE` only, report unreadable / unclassifiable | `incompatible` (fail-safe, with a workflow warning) |
 | `ABIDIFF_ERROR` or `ABIDIFF_USAGE_ERROR` | `error` |
+
+The second stage parses the report's `… changes summary:` lines (e.g. `Functions changes summary: 0 Removed, 1 Changed, 0 Added function`), which is the only place `abidiff` distinguishes additions from modifications.
 
 `fail-on` decides which verdicts cause the job to fail:
 
@@ -214,7 +218,7 @@ If you only want the check (no comment, no labels), set `comment-pr: 'false'` an
 1. `apt-get install -y abigail-tools` (or `libabigail-tools` on older Debian/Ubuntu releases — the package was renamed in Debian 12 / Ubuntu 24.04) if `abidiff` is not already present.
    This is a no-op inside containers that already ship the libabigail binaries.
 2. [scripts/run-abidiff.sh](scripts/run-abidiff.sh) validates inputs, assembles the `abidiff` command line, and captures stdout+stderr to a report file in `$RUNNER_TEMP`.
-3. [scripts/decode-verdict.sh](scripts/decode-verdict.sh) decodes the `abidiff` bitmap into a verdict and a `should-fail` flag based on `fail-on`.
+3. [scripts/decode-verdict.sh](scripts/decode-verdict.sh) decodes the `abidiff` bitmap — plus the report's changes-summary lines when only `ABI_CHANGE` is set — into a verdict and a `should-fail` flag based on `fail-on`.
 4. The report is uploaded as an artifact via `actions/upload-artifact`.
 5. [scripts/post-comment.js](scripts/post-comment.js), called through `actions/github-script`, finds the existing sticky comment by HTML marker and updates it (or creates one), then reconciles the configured labels.
 6. A final step exits non-zero iff `should-fail=true`.
@@ -231,14 +235,15 @@ libabigail-action/
 ├── README.md
 ├── scripts/
 │   ├── run-abidiff.sh         # invokes abidiff, captures output
-│   ├── decode-verdict.sh      # interprets the exit bitmap
+│   ├── decode-verdict.sh      # interprets the exit bitmap + report summary
 │   └── post-comment.js        # sticky comment + label management
 ├── test/
 │   ├── fixtures/              # toy libs with known ABI deltas
 │   │   ├── Makefile
 │   │   ├── v1/                # baseline
 │   │   ├── v2_additions/      # adds a new symbol — additions-only
-│   │   └── v3_breaking/       # changes a return type — incompatible
+│   │   ├── v3_breaking/       # changes parameter types — incompatible
+│   │   └── v4_changed/        # changes a return type — incompatible (exit bit 4 only)
 │   └── workflow.yml           # copy-pasteable consumer workflow
 └── .github/
     └── workflows/

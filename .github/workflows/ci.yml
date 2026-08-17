@@ -1,5 +1,5 @@
-# Self-test: build the three fixture .so files and run the action against
-# each pair to verify all three verdicts are produced correctly.
+# Self-test: build the fixture .so files and run the action against each
+# pair to verify every verdict is produced correctly.
 name: ci
 
 on:
@@ -42,7 +42,7 @@ jobs:
       - name: Verify libraries contain DWARF
         working-directory: test/fixtures
         run: |
-          for f in build/libfoo-v1.so build/libfoo-v2.so build/libfoo-v3.so; do
+          for f in build/libfoo-v1.so build/libfoo-v2.so build/libfoo-v3.so build/libfoo-v4.so; do
             test -f "$f"
             readelf -S "$f" | grep -q '\.debug_info'
           done
@@ -113,6 +113,32 @@ jobs:
           fail-on: none
           comment-pr: 'false'
           report-name: abidiff-report-incompatible
+      - name: Assert verdict == incompatible
+        run: |
+          test "${{ steps.abi.outputs.verdict }}" = "incompatible"
+
+  # Regression test for the exit-code-4-only case: a modified declaration
+  # (return type change, same symbol) makes abidiff exit with ABIDIFF_ABI_CHANGE
+  # alone. The verdict must come from the report's changes-summary lines, not
+  # the bitmap — a bitmap-only decode mislabels this as additions-only.
+  verdict-changed-incompatible:
+    needs: fixtures-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: build/
+      - name: Run libabigail-action (v1 vs v4, fail-on=none)
+        id: abi
+        uses: ./
+        with:
+          base-lib: build/libfoo-v1.so
+          head-lib: build/libfoo-v4.so
+          fail-on: none
+          comment-pr: 'false'
+          report-name: abidiff-report-changed
       - name: Assert verdict == incompatible
         run: |
           test "${{ steps.abi.outputs.verdict }}" = "incompatible"
