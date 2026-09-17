@@ -1,0 +1,44 @@
+# Companion to test/workflow.yml for repositories that receive pull requests
+# from forks.
+#
+# On pull_request events from a fork, GitHub gives the check job a read-only
+# GITHUB_TOKEN no matter what its permissions block asks for, so the sticky
+# comment and labels cannot be written from that job. This second workflow
+# runs on the base repository after the check workflow finishes, with a normal
+# write token, never checks out the pull request, and publishes the verdicts
+# it finds in the check run's report artifacts.
+#
+# Drop a copy next to your abi.yml, make `workflows:` match its `name:`, and
+# set `comment-pr: 'false'` / empty `label-*` in abi.yml so the check job does
+# not try (and fail) to post by itself.
+#
+# Note: workflow_run workflows only trigger once this file exists on the
+# default branch.
+name: ABI Compliance Check (report)
+
+on:
+  workflow_run:
+    workflows: ["ABI Compliance Check"]   # the `name:` of test/workflow.yml
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write   # comment + label
+  issues: write          # label
+  actions: read          # download another run's artifacts
+
+jobs:
+  report:
+    # Only pull-request runs carry a verdict worth publishing.
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: abi-report-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
+    steps:
+      - uses: fujitatomoya/libabigail-action/publish@v1
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          # artifact-pattern: abidiff-*     # report-name(s) used in abi.yml
+          label-compat: abi-compatible
+          label-break: abi-break

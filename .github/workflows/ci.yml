@@ -12,6 +12,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  actions: read          # publish-dry-run downloads this run's artifacts
 
 jobs:
   shellcheck:
@@ -23,6 +24,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends shellcheck
           shellcheck scripts/*.sh
+
+  # Comment rendering, verdict aggregation, artifact loading, label
+  # reconciliation and the workflow_run publish flow, against a fake Octokit.
+  unit-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: post-comment.js unit tests
+        run: node test/test-publish.js
 
   fixtures-build:
     runs-on: ubuntu-latest
@@ -169,3 +179,41 @@ jobs:
             exit 1
           fi
           test "${{ steps.abi.outputs.verdict }}" = "incompatible"
+
+  # End-to-end check of the publish sub-action against the report bundles the
+  # verdict jobs above uploaded to this very run: download them by pattern and
+  # aggregate the verdicts (worst wins -> incompatible). Every write is
+  # disabled, so only the outputs are asserted. On push / dispatch there is no
+  # pull request, and the action must then exit cleanly with an empty pr-number.
+  publish-dry-run:
+    needs:
+      - verdict-compatible
+      - verdict-additions-only
+      - verdict-incompatible
+      - verdict-changed-incompatible
+      - verdict-incompatible-fails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish (dry run, no comment, no labels)
+        id: publish
+        uses: ./publish
+        with:
+          run-id: ${{ github.run_id }}
+          artifact-pattern: abidiff-report-*
+          comment-pr: 'false'
+      - name: Assert aggregated verdict and PR resolution
+        env:
+          EVENT: ${{ github.event_name }}
+          VERDICT: ${{ steps.publish.outputs.verdict }}
+          COUNT: ${{ steps.publish.outputs.count }}
+          PR: ${{ steps.publish.outputs.pr-number }}
+        run: |
+          echo "verdict=$VERDICT count=$COUNT pr-number=$PR"
+          test "$COUNT" = "5"
+          test "$VERDICT" = "incompatible"
+          if [[ "$EVENT" == "pull_request" ]]; then
+            test -n "$PR"
+          else
+            test -z "$PR"
+          fi
