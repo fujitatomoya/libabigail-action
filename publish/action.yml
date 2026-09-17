@@ -1,0 +1,126 @@
+name: 'libabigail ABI check - publish'
+description: >-
+  Post the sticky pull-request comment and labels for ABI verdicts that
+  libabigail-action produced earlier, from a trusted workflow_run job. This is
+  how pull requests from forks get their comment and labels: the check run
+  itself only has a read-only token there.
+author: 'fujitatomoya'
+branding:
+  icon: 'message-square'
+  color: 'blue'
+
+inputs:
+  run-id:
+    description: >-
+      Workflow run whose report artifacts to download, normally
+      github.event.workflow_run.id. Leave empty to publish whatever is already
+      under verdicts-dir.
+    required: false
+    default: ''
+  artifact-pattern:
+    description: 'Glob selecting the report artifacts of that run (one bundle per library).'
+    required: false
+    default: 'abidiff-*'
+  verdicts-dir:
+    description: >-
+      Directory that holds (or receives) the report bundles, one sub-directory
+      per artifact, each with verdict.json and abidiff-report.txt. Defaults to
+      $RUNNER_TEMP/libabigail-verdicts.
+    required: false
+    default: ''
+  pr-number:
+    description: >-
+      Pull request to annotate. Resolved automatically from the workflow_run
+      payload (head commit, then head owner:branch) or the pull_request payload
+      when empty.
+    required: false
+    default: ''
+  head-sha:
+    description: 'Commit the verdicts were computed for; defaults to workflow_run.head_sha.'
+    required: false
+    default: ''
+  skip-stale:
+    description: >-
+      Do nothing when the pull request has moved past head-sha, so an older
+      run never overwrites the comment of a newer one.
+    required: false
+    default: 'true'
+  comment-pr:
+    description: 'Post / update the sticky comment (one comment covering every library).'
+    required: false
+    default: 'true'
+  label-compat:
+    description: 'Label applied when every library is compatible or additions-only.'
+    required: false
+    default: ''
+  label-break:
+    description: 'Label applied when any library is incompatible.'
+    required: false
+    default: ''
+  marker-suffix:
+    description: 'Suffix for the sticky-comment HTML marker.'
+    required: false
+    default: 'abi-check'
+  github-token:
+    description: >-
+      Token used to download the artifacts (actions: read) and to write the
+      comment and labels (pull-requests: write, issues: write).
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: 'Overall verdict (worst across libraries): compatible | additions-only | incompatible | error; empty when nothing was published.'
+    value: ${{ steps.publish.outputs.verdict }}
+  pr-number:
+    description: 'Pull request that was annotated; empty when none could be resolved.'
+    value: ${{ steps.publish.outputs.pr-number }}
+  count:
+    description: 'Number of verdict.json files found.'
+    value: ${{ steps.publish.outputs.count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve verdicts directory
+      id: dir
+      shell: bash
+      env:
+        VERDICTS_DIR: ${{ inputs.verdicts-dir }}
+      run: |
+        dir="${VERDICTS_DIR:-$RUNNER_TEMP/libabigail-verdicts}"
+        mkdir -p "$dir"
+        echo "path=$dir" >> "$GITHUB_OUTPUT"
+
+    # merge-multiple stays off so each artifact lands in its own directory and
+    # several verdict.json files do not overwrite each other. A run without
+    # matching artifacts (build failed before the diff) is not an error here;
+    # the publish step reports it as a notice.
+    - name: Download report artifacts from the check run
+      if: inputs.run-id != ''
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        run-id: ${{ inputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+        pattern: ${{ inputs.artifact-pattern }}
+        path: ${{ steps.dir.outputs.path }}
+        merge-multiple: false
+
+    - name: Publish comment and labels
+      id: publish
+      uses: actions/github-script@v7
+      env:
+        VERDICTS_DIR: ${{ steps.dir.outputs.path }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        SKIP_STALE: ${{ inputs.skip-stale }}
+        COMMENT_PR: ${{ inputs.comment-pr }}
+        LABEL_COMPAT: ${{ inputs.label-compat }}
+        LABEL_BREAK: ${{ inputs.label-break }}
+        MARKER_SUFFIX: ${{ inputs.marker-suffix }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const mod = require(`${process.env.GITHUB_ACTION_PATH}/../scripts/post-comment.js`);
+          await mod.publishFromArtifacts({ github, context, core, env: process.env });

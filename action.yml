@@ -41,9 +41,16 @@ inputs:
     required: false
     default: ''
   report-name:
-    description: 'Artifact name for the full abidiff report.'
+    description: >-
+      Artifact name for the report bundle (abidiff-report.txt + verdict.json).
+      Give every invocation in a run a distinct name; the publish sub-action
+      selects the bundles of a run by glob (default abidiff-*).
     required: false
     default: 'abidiff-report'
+  library:
+    description: 'Display name of the library under test in comments and verdict.json; defaults to the head-lib file name.'
+    required: false
+    default: ''
   abidiff-extra-args:
     description: 'Extra arguments passed verbatim to abidiff.'
     required: false
@@ -67,6 +74,12 @@ outputs:
   report:
     description: 'Path to the full abidiff text report (also uploaded as an artifact).'
     value: ${{ steps.run.outputs.report-path }}
+  verdict-file:
+    description: 'Path to verdict.json (machine-readable verdict; uploaded next to the report).'
+    value: ${{ steps.verdict.outputs.verdict-path }}
+  report-dir:
+    description: 'Directory uploaded as the report artifact (contains abidiff-report.txt and verdict.json).'
+    value: ${{ steps.paths.outputs.report-dir }}
   summary:
     description: 'One-line human-readable verdict summary.'
     value: ${{ steps.decode.outputs.summary }}
@@ -74,6 +87,23 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    # One directory per invocation holds the report and verdict.json; it is
+    # uploaded as a whole so the publish sub-action finds both files together.
+    # Resolved first so that verdict.json can still record an error verdict
+    # when a later step (even the abidiff install) fails.
+    - name: Resolve report paths
+      id: paths
+      shell: bash
+      env:
+        REPORT_NAME: ${{ inputs.report-name }}
+      run: |
+        safe="$(printf '%s' "$REPORT_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+        dir="$RUNNER_TEMP/libabigail-action/${safe:-abidiff-report}"
+        mkdir -p "$dir"
+        echo "report-dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "report-path=$dir/abidiff-report.txt" >> "$GITHUB_OUTPUT"
+        echo "verdict-path=$dir/verdict.json" >> "$GITHUB_OUTPUT"
+
     - name: Ensure libabigail is installed
       shell: bash
       run: |
@@ -114,7 +144,7 @@ runs:
         HEADERS_DIR_HEAD: ${{ inputs.headers-dir-head }}
         FAIL_ON: ${{ inputs.fail-on }}
         EXTRA_ARGS: ${{ inputs.abidiff-extra-args }}
-        REPORT_PATH: ${{ runner.temp }}/abidiff-report.txt
+        REPORT_PATH: ${{ steps.paths.outputs.report-path }}
       run: bash "$GITHUB_ACTION_PATH/scripts/run-abidiff.sh"
 
     - name: Decode verdict
@@ -126,14 +156,41 @@ runs:
         REPORT_PATH: ${{ steps.run.outputs.report-path }}
       run: bash "$GITHUB_ACTION_PATH/scripts/decode-verdict.sh"
 
-    - name: Upload abidiff report artifact
+    # Written even when abidiff could not run (missing library, ...) so that a
+    # publisher reading the artifact later sees an explicit error verdict
+    # instead of nothing.
+    - name: Write verdict metadata
+      id: verdict
+      if: always()
+      shell: bash
+      env:
+        VERDICT_PATH: ${{ steps.paths.outputs.verdict-path }}
+        VERDICT: ${{ steps.decode.outputs.verdict || 'error' }}
+        SUMMARY: ${{ steps.decode.outputs.summary || 'abidiff could not be run; see the workflow log.' }}
+        ABIDIFF_EXIT: ${{ steps.run.outputs.abidiff-exit || '0' }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        SHOULD_FAIL: ${{ steps.decode.outputs.should-fail || 'true' }}
+        BASE_LIB: ${{ inputs.base-lib }}
+        HEAD_LIB: ${{ inputs.head-lib }}
+        LIBRARY: ${{ inputs.library }}
+        SUPPRESSIONS: ${{ inputs.suppressions }}
+        REPORT_PATH: ${{ steps.paths.outputs.report-path }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/write-verdict.sh"
+
+    - name: Upload report artifact (abidiff-report.txt + verdict.json)
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.report-name }}
-        path: ${{ steps.run.outputs.report-path }}
+        path: ${{ steps.paths.outputs.report-dir }}
         if-no-files-found: warn
 
+    # Only meaningful for pull requests from the same repository: on
+    # pull_request events from a fork the token is read-only and every write
+    # below fails with 403 (surfaced as a warning plus a hint, never as a job
+    # failure). Fork pull requests are published from a workflow_run workflow
+    # with the publish sub-action instead; see README "Fork pull requests".
     - name: Comment on PR and update labels
       if: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
       uses: actions/github-script@v7
@@ -143,6 +200,7 @@ runs:
         REPORT_PATH: ${{ steps.run.outputs.report-path }}
         BASE_LIB: ${{ inputs.base-lib }}
         HEAD_LIB: ${{ inputs.head-lib }}
+        LIBRARY: ${{ inputs.library }}
         SUPPRESSIONS: ${{ inputs.suppressions }}
         MARKER_SUFFIX: ${{ inputs.marker-suffix }}
         LABEL_COMPAT: ${{ inputs.label-compat }}
@@ -151,13 +209,8 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const fs = require('fs');
-          const reportPath = process.env.REPORT_PATH;
-          process.env.REPORT = fs.existsSync(reportPath)
-            ? fs.readFileSync(reportPath, 'utf8')
-            : '';
-          const fn = require(`${process.env.GITHUB_ACTION_PATH}/scripts/post-comment.js`);
-          await fn({ github, context, core });
+          const mod = require(`${process.env.GITHUB_ACTION_PATH}/scripts/post-comment.js`);
+          await mod.publishFromJob({ github, context, core, env: process.env });
 
     - name: Enforce fail-on policy
       shell: bash
