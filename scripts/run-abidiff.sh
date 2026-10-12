@@ -9,6 +9,7 @@ set -uo pipefail
 SUPPRESSIONS="${SUPPRESSIONS:-}"
 HEADERS_DIR_BASE="${HEADERS_DIR_BASE:-}"
 HEADERS_DIR_HEAD="${HEADERS_DIR_HEAD:-}"
+UNREFERENCED_SYMBOLS="${UNREFERENCED_SYMBOLS:-true}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 REPORT_PATH="${REPORT_PATH:-${RUNNER_TEMP:-/tmp}/abidiff-report.txt}"
 
@@ -46,6 +47,15 @@ args=()
 [[ -n "$SUPPRESSIONS"      ]] && args+=(--suppressions "$SUPPRESSIONS")
 [[ -n "$HEADERS_DIR_BASE"  ]] && args+=(--headers-dir1 "$HEADERS_DIR_BASE")
 [[ -n "$HEADERS_DIR_HEAD"  ]] && args+=(--headers-dir2 "$HEADERS_DIR_HEAD")
+# ELF symbols without debug info (typically COMDAT template instantiations
+# from libstdc++ whose DWARF was dropped) are outside the reach of suppression
+# specs: abidiff compares them by symbol table only and treats a removed one
+# as an incompatible change. Callers that always build with -g can turn them
+# off; the default keeps abidiff's behaviour (libraries without DWARF would
+# otherwise diff as empty).
+if [[ "${UNREFERENCED_SYMBOLS,,}" == "false" ]]; then
+  args+=(--no-unreferenced-symbols)
+fi
 
 if [[ -n "$EXTRA_ARGS" ]]; then
   # Word-split on whitespace; user-controlled input.

@@ -1,0 +1,11 @@
+Functions changes summary: 1 Removed, 0 Changed, 1 Added functions
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 Removed function:
+
+  [D] 'function int libfoo::multiply(int, int)'    {_ZN6libfoo8multiplyEii}
+
+1 Added function:
+
+  [A] 'function int libfoo::multiply(long int, long int)'    {_ZN6libfoo8multiplyEll}
+
