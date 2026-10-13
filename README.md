@@ -78,6 +78,7 @@ A complete, copy-pasteable template lives at [test/workflow.yml](test/workflow.y
 | `suppressions` | no | — | Path to a libabigail suppression spec file (e.g. `.abignore`). |
 | `headers-dir-base` | no | — | Public-headers dir for the baseline; filters the ABI surface. |
 | `headers-dir-head` | no | — | Public-headers dir for the head build; filters the ABI surface. |
+| `public-headers-regexp` | no | — | Regexp on source file paths; only declarations from matching files count as ABI (e.g. `(^|/)include/`). See [Filtering the ABI surface with public headers](#filtering-the-abi-surface-with-public-headers). |
 | `fail-on` | no | `incompatible` | `none` \| `addition` \| `change` \| `incompatible`. See [Verdict logic](#verdict-logic). |
 | `comment-pr` | no | `true` | Post / update a sticky PR comment. |
 | `label-compat` | no | — | Label applied when the verdict is compatible or additions-only. |
@@ -311,9 +312,64 @@ See the [libabigail manual on suppression specifications](https://sourceware.org
 
 ## Filtering the ABI surface with public headers
 
-If you ship a subset of types and functions as your public ABI, point `headers-dir-base` / `headers-dir-head` at your public-headers directory.
-`abidiff` will then ignore changes to types and functions that are not reachable from those headers, dramatically cutting noise.
-Both directories must contain the headers as they were at the corresponding build (so usually one points into your baseline checkout and the other into the PR checkout).
+A library's ABI is what its users can reach from its **public headers**. A
+class defined under `src/` and only ever touched through a pointer (the pimpl
+idiom, opaque handles, scheduler internals) can change layout and gain or lose
+member functions without affecting any user binary, yet `abidiff` compares the
+whole DWARF and reports every such change as a break. Two inputs implement the
+policy "only public headers are ABI":
+
+- **`public-headers-regexp`** (recommended): a POSIX extended regular
+  expression matched against the path of the file a declaration comes from, as
+  recorded in the DWARF of the build. `(^|/)include/` fits the usual
+  `include/` + `src/` layout. The action then generates a suppression spec from
+  both libraries with `abidw` and adds it to `suppressions`:
+
+  - `[suppress_type] source_location_not_regexp = <regexp>` with
+    `accessed_through = reference-or-pointer`: changes to a type defined
+    elsewhere are ignored when the type is reached through a pointer or a
+    reference. A private type embedded *by value* in a public type still
+    changes that type's layout and is reported.
+  - one `[suppress_function]` / `[suppress_variable]` pair per class, struct
+    or union defined elsewhere that has exported members
+    (`name_regexp = ^ns::Class::`), so their member functions and static data
+    members may be added, removed or changed. `abidiff` cannot do this by
+    itself: `--headers-dir` only filters types, and no `[suppress_function]`
+    property selects by declaration location.
+
+  The generated file, `public-headers.abignore`, is printed in the job log and
+  uploaded next to the report. The regexp is also compiled by Python to
+  classify `abidw`'s output, so stick to the syntax both engines share.
+
+- **`headers-dir-base` / `headers-dir-head`**: `abidiff`'s own
+  `--headers-dir1/2`. libabigail matches the files found there against the
+  DWARF by **basename only**, so the directory may be an install tree even
+  though the DWARF records source paths, but a private header that shares its
+  basename with any public one is treated as public, and a public type whose
+  header is missing from the directory is treated as private. The set must be
+  complete and the same on both sides: a type that is private on either side
+  is filtered on both. This mode filters types only; removed member functions
+  of private classes are still reported.
+
+What neither mode covers:
+
+- **A public class that both gains a data member and holds a pointer to a
+  changed private type is reported as compatible.** libabigail suppresses a
+  diff node whose changed children are all suppressed, and an inserted data
+  member or a size change does not keep it alive (its sources note the rule
+  "may be too strong"). The same applies to any type suppression, e.g. one on
+  `std::` when a `std::variant` member gains an alternative. Keep layout
+  changes of public classes in their own pull request, or review the
+  `(N filtered out)` counts in the report when a PR touches both.
+- **Free functions declared only in a private header.** `abidw` records their
+  definition site (the `.cpp`), so they cannot be told apart from public free
+  functions; suppress them by name in your own `.abignore`.
+- Private headers whose path happens to match the regexp (e.g. `src/include/`)
+  are treated as public: more noise, never a missed break.
+
+The test suite (`test/test-public-headers.sh`, `test/fixtures/pimpl`,
+`test/fixtures/byvalue`) encodes these expectations, including the
+swallowed-insertion limitation as a trip-wire for future libabigail releases.
 
 ---
 
@@ -357,6 +413,7 @@ libabigail-action/
 ├── README.md
 ├── scripts/
 │   ├── run-abidiff.sh         # invokes abidiff, captures output
+│   ├── public-headers-suppressions.py  # generates the spec behind public-headers-regexp (abidw)
 │   ├── decode-verdict.sh      # interprets the exit bitmap + report summary
 │   ├── write-verdict.sh       # records verdict.json next to the report
 │   └── post-comment.js        # sticky comment + label management (both entry points)
@@ -366,9 +423,12 @@ libabigail-action/
 │   │   ├── v1/                # baseline
 │   │   ├── v2_additions/      # adds a new symbol — additions-only
 │   │   ├── v3_breaking/       # changes parameter types — incompatible
-│   │   └── v4_changed/        # changes a return type — incompatible (exit bit 4 only)
+│   │   ├── v4_changed/        # changes a return type — incompatible (exit bit 4 only)
+│   │   ├── pimpl/             # private-header change behind a pimpl pointer — public-headers-regexp
+│   │   └── byvalue/           # private type embedded by value — must stay incompatible
 │   ├── reports/               # canned abidiff reports for the decoder tests
 │   ├── test-decode-verdict.sh # unit tests for decode-verdict.sh (bash test/test-decode-verdict.sh)
+│   ├── test-public-headers.sh # public-headers-regexp end to end on the fixtures (needs abidiff, abidw, g++)
 │   ├── test-publish.js        # unit tests for post-comment.js (node test/test-publish.js)
 │   ├── workflow.yml           # copy-pasteable check workflow
 │   └── workflow-report.yml    # copy-pasteable workflow_run publisher for fork PRs
