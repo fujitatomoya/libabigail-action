@@ -24,6 +24,16 @@ inputs:
     description: 'Optional public-headers directory for the head build; filters the ABI surface.'
     required: false
     default: ''
+  public-headers-regexp:
+    description: >-
+      Treat only declarations from files whose path matches this (POSIX
+      extended) regular expression as ABI, e.g. '(^|/)include/'. Types defined
+      elsewhere are ignored when reached through a pointer or a reference
+      (pimpl), and the exported member functions of classes defined elsewhere
+      may come and go. A spec is generated from both libraries with abidw and
+      added to `suppressions`. See the README for what this does not cover.
+    required: false
+    default: ''
   fail-on:
     description: 'Verdict severity that should fail the job: none | addition | change | incompatible.'
     required: false
@@ -152,6 +162,7 @@ runs:
         SUPPRESSIONS: ${{ inputs.suppressions }}
         HEADERS_DIR_BASE: ${{ inputs.headers-dir-base }}
         HEADERS_DIR_HEAD: ${{ inputs.headers-dir-head }}
+        PUBLIC_HEADERS_REGEXP: ${{ inputs.public-headers-regexp }}
         UNREFERENCED_SYMBOLS: ${{ inputs.unreferenced-symbols }}
         FAIL_ON: ${{ inputs.fail-on }}
         EXTRA_ARGS: ${{ inputs.abidiff-extra-args }}

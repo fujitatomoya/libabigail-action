@@ -9,6 +9,7 @@ set -uo pipefail
 SUPPRESSIONS="${SUPPRESSIONS:-}"
 HEADERS_DIR_BASE="${HEADERS_DIR_BASE:-}"
 HEADERS_DIR_HEAD="${HEADERS_DIR_HEAD:-}"
+PUBLIC_HEADERS_REGEXP="${PUBLIC_HEADERS_REGEXP:-}"
 UNREFERENCED_SYMBOLS="${UNREFERENCED_SYMBOLS:-true}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 REPORT_PATH="${REPORT_PATH:-${RUNNER_TEMP:-/tmp}/abidiff-report.txt}"
@@ -65,6 +66,27 @@ if [[ -n "$EXTRA_ARGS" ]]; then
 fi
 
 mkdir -p "$(dirname "$REPORT_PATH")"
+
+# "Only public headers are ABI": generate a suppression spec from the regexp
+# and the two libraries (types defined elsewhere when reached through a
+# pointer or reference, plus the exported members of every class defined
+# elsewhere) and add it on top of the caller's own spec. The file is written
+# next to the report so it ends up in the report artifact for inspection. See
+# scripts/public-headers-suppressions.py for the policy and its limits.
+if [[ -n "$PUBLIC_HEADERS_REGEXP" ]]; then
+  generated="$(dirname "$REPORT_PATH")/public-headers.abignore"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if ! python3 "$script_dir/public-headers-suppressions.py" \
+        --public-regexp "$PUBLIC_HEADERS_REGEXP" --output "$generated" \
+        "$BASE_LIB" "$HEAD_LIB"; then
+    echo "::error::Could not generate the public-headers suppressions (see above)."
+    exit 2
+  fi
+  echo "::group::generated suppressions ($generated)"
+  cat "$generated"
+  echo "::endgroup::"
+  args+=(--suppressions "$generated")
+fi
 
 echo "+ abidiff ${args[*]} $BASE_LIB $HEAD_LIB"
 set +e

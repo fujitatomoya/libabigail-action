@@ -60,10 +60,14 @@ jobs:
       - name: Verify libraries contain DWARF
         working-directory: test/fixtures
         run: |
-          for f in build/libfoo-v1.so build/libfoo-v2.so build/libfoo-v3.so build/libfoo-v4.so; do
+          for f in build/*.so; do
             test -f "$f"
             readelf -S "$f" | grep -q '\.debug_info'
           done
+      # public-headers-regexp: generator + run-abidiff.sh + decode-verdict.sh
+      # against the pimpl / byvalue fixtures (needs abidiff and abidw).
+      - name: public-headers-suppressions.py unit tests
+        run: bash test/test-public-headers.sh
       - uses: actions/upload-artifact@v4
         with:
           name: fixtures
@@ -188,6 +192,36 @@ jobs:
           test "${{ steps.abi.outputs.verdict }}" = "additions-only"
           test "${{ steps.abi.outputs.exit-code }}" = "4"
 
+  # public-headers-regexp: the private layout change and the removed private
+  # member function of the pimpl fixture are implementation detail, so the
+  # verdict is additions-only (new private members, libstdc++ instantiations)
+  # with ABIDIFF_ABI_CHANGE alone; without the regexp this pair is a break
+  # (test/test-public-headers.sh covers that side).
+  verdict-public-headers:
+    needs: fixtures-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: build/
+      - name: Run libabigail-action (pimpl base vs private, public-headers-regexp)
+        id: abi
+        uses: ./
+        with:
+          base-lib: build/libpimpl-base.so
+          head-lib: build/libpimpl-private.so
+          public-headers-regexp: '(^|/)include/'
+          unreferenced-symbols: 'false'
+          fail-on: incompatible
+          comment-pr: 'false'
+          report-name: abidiff-report-public-headers
+      - name: Assert verdict == additions-only
+        run: |
+          test "${{ steps.abi.outputs.verdict }}" = "additions-only"
+          test "${{ steps.abi.outputs.exit-code }}" = "4"
+
   verdict-incompatible-fails:
     needs: fixtures-build
     runs-on: ubuntu-latest
@@ -227,6 +261,7 @@ jobs:
       - verdict-incompatible
       - verdict-changed-incompatible
       - verdict-no-unreferenced-symbols
+      - verdict-public-headers
       - verdict-incompatible-fails
     runs-on: ubuntu-latest
     steps:
@@ -246,7 +281,7 @@ jobs:
           PR: ${{ steps.publish.outputs.pr-number }}
         run: |
           echo "verdict=$VERDICT count=$COUNT pr-number=$PR"
-          test "$COUNT" = "6"
+          test "$COUNT" = "7"
           test "$VERDICT" = "incompatible"
           if [[ "$EVENT" == "pull_request" ]]; then
             test -n "$PR"
