@@ -119,6 +119,10 @@ runs:
         LABEL_COMPAT: ${{ inputs.label-compat }}
         LABEL_BREAK: ${{ inputs.label-break }}
         MARKER_SUFFIX: ${{ inputs.marker-suffix }}
+        # The check run whose verdicts are published, linked from the comment
+        # (empty outside workflow_run events; the script then falls back to
+        # the payload).
+        RUN_URL: ${{ github.event.workflow_run.html_url }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |

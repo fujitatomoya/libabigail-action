@@ -76,6 +76,20 @@ function cell(s) {
   return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
+// Only a plain http(s) URL is linked from the comment; anything else is
+// dropped (the value comes from the event payload or the workflow env).
+function runLink(url) {
+  const s = String(url || '').trim();
+  return /^https?:\/\/[^\s<>()]+$/.test(s) ? s : '';
+}
+
+// URL of the current run, from the github-script context (serverUrl and
+// runId are set by actions/github-script).
+function runUrlFromContext(context) {
+  if (!context || !context.serverUrl || !context.runId || !context.repo) return '';
+  return `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+}
+
 function isForkPullRequest(context) {
   const pr = context.payload && context.payload.pull_request;
   if (!pr || !pr.head || !pr.head.repo || !pr.head.repo.full_name) return false;
@@ -156,10 +170,11 @@ function loadVerdicts(dir, core) {
   return entries;
 }
 
-function renderComment(entries, { headSha = '', markerSuffix = 'abi-check' } = {}) {
+function renderComment(entries, { headSha = '', markerSuffix = 'abi-check', runUrl = '' } = {}) {
   const marker = `<!-- libabigail-action-marker:${sanitizeMarkerSuffix(markerSuffix)} -->`;
   const overall = overallVerdict(entries) || 'error';
   const sha = shortSha(headSha);
+  const link = runLink(runUrl);
   const single = entries.length === 1;
 
   const lines = [
@@ -198,7 +213,8 @@ function renderComment(entries, { headSha = '', markerSuffix = 'abi-check' } = {
     let note = '';
     if (body.length > budget) {
       body = body.slice(0, budget);
-      note = '\n... (report truncated; see the full report in the workflow run artifacts)';
+      note = '\n... (report truncated; the full report is in the check run artifacts' +
+        (link ? `: ${link}` : '') + ')';
     }
     lines.push(`<details><summary>${title}</summary>`, '');
     if (!single) {
@@ -210,6 +226,7 @@ function renderComment(entries, { headSha = '', markerSuffix = 'abi-check' } = {
   const suppressions = [...new Set(entries.map((e) => e.suppressions).filter(Boolean))];
   lines.push(
     `<sub>Updated for commit ${sha || '(unknown)'}` +
+      (link ? ` · [check run](${link})` : '') +
       (suppressions.length ? ` · suppressions: ${suppressions.map((s) => `\`${code(s)}\``).join(', ')}` : '') +
       '</sub>',
     marker,
@@ -266,12 +283,12 @@ async function reconcileLabels(github, core, { owner, repo, prNumber, verdict, l
 //   strict: false  -> failures are warnings (in-job mode: fork PRs are expected)
 //   strict: true   -> failures fail the step (publish mode: a real misconfiguration)
 async function publish({
-  github, context, core, entries, prNumber, headSha,
+  github, context, core, entries, prNumber, headSha, runUrl = '',
   isFork = false, strict = false,
   commentPr = true, labelCompat = '', labelBreak = '', markerSuffix = 'abi-check',
 }) {
   const { owner, repo } = context.repo;
-  const { body, marker, overall } = renderComment(entries, { headSha, markerSuffix });
+  const { body, marker, overall } = renderComment(entries, { headSha, markerSuffix, runUrl });
   const failures = [];
 
   if (commentPr) {
@@ -348,6 +365,8 @@ async function publishFromArtifacts({ github, context, core, env }) {
   const pr = context.payload && context.payload.pull_request;
   let prNumber = parseInt(env.PR_NUMBER || '', 10) || 0;
   let headSha = env.HEAD_SHA || '';
+  // The check run that produced the verdicts, not this publisher run.
+  const runUrl = env.RUN_URL || (run && run.html_url) || '';
   if (!headSha && run) headSha = run.head_sha || '';
   if (!headSha && pr) headSha = (pr.head && pr.head.sha) || '';
   if (!headSha) headSha = entries.map((e) => e.headSha).find(Boolean) || '';
@@ -376,7 +395,7 @@ async function publishFromArtifacts({ github, context, core, env }) {
   }
 
   const result = await publish({
-    github, context, core, entries, prNumber, headSha,
+    github, context, core, entries, prNumber, headSha, runUrl,
     isFork: false, strict: true,
     commentPr,
     labelCompat: env.LABEL_COMPAT || '',
@@ -400,6 +419,7 @@ async function publishFromJob({ github, context, core, env = process.env }) {
     entries: [entry],
     prNumber: pr.number,
     headSha: (pr.head && pr.head.sha) || '',
+    runUrl: env.RUN_URL || runUrlFromContext(context),
     isFork: isForkPullRequest(context),
     strict: false,
     commentPr: (env.COMMENT_PR || 'true').toLowerCase() === 'true',
@@ -417,6 +437,8 @@ Object.assign(module.exports, {
   normalizeVerdict,
   overallVerdict,
   sanitizeMarkerSuffix,
+  runLink,
+  runUrlFromContext,
   isForkPullRequest,
   entryFromEnv,
   readEntry,

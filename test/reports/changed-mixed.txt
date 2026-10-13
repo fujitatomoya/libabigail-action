@@ -1,0 +1,22 @@
+Functions changes summary: 0 Removed, 2 Changed (4 filtered out), 1 Added functions
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 Added function:
+
+  [A] 'function int libfoo::subtract(int, int)'    {_ZN6libfoo8subtractEii}
+
+2 functions with some indirect sub-type change:
+
+  [C] 'method void rclcpp::Service<Foo>::Service(std::shared_ptr<rcl_node_s>, const std::string&, rclcpp::AnyServiceCallback<Foo>, rcl_service_options_t&)' at service.hpp:260:1 has some indirect sub-type changes:
+    implicit parameter 0 of type 'rclcpp::Service<Foo>*' has sub-type changes:
+      in pointed to type 'class rclcpp::Service<Foo>' at service.hpp:231:1:
+        type size hasn't changed
+        no data member change (1 filtered);
+
+  [C] 'function void libfoo::configure(libfoo::options*)' at foo.cpp:12:1 has some indirect sub-type changes:
+    parameter 1 of type 'libfoo::options*' has sub-type changes:
+      in pointed to type 'struct libfoo::options' at foo.h:5:1:
+        type size changed from 64 to 96 (in bits)
+        1 data member insertion:
+          'int libfoo::options::verbosity', at offset 64 (in bits) at foo.h:8:1
+

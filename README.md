@@ -84,6 +84,7 @@ A complete, copy-pasteable template lives at [test/workflow.yml](test/workflow.y
 | `label-break` | no | — | Label applied when the verdict is incompatible. |
 | `report-name` | no | `abidiff-report` | Artifact name for the report bundle (`abidiff-report.txt` + `verdict.json`). Use a distinct name per invocation in a run; the `publish` sub-action selects bundles by glob (`abidiff-*`). |
 | `library` | no | head-lib file name | Display name of the library in the comment and in `verdict.json`. |
+| `unreferenced-symbols` | no | `true` | Report changes to ELF symbols without debug info (abidiff's default). `false` passes `--no-unreferenced-symbols`; see [Verdict logic](#verdict-logic). |
 | `abidiff-extra-args` | no | — | Extra arguments passed verbatim to `abidiff`. |
 | `marker-suffix` | no | `abi-check` | Suffix in the sticky-comment HTML marker, so multiple ABI checks (e.g. one per library) can coexist on a single PR. |
 | `github-token` | no | `${{ github.token }}` | Token used to read / write PR comments and labels. |
@@ -109,12 +110,16 @@ A complete, copy-pasteable template lives at [test/workflow.yml](test/workflow.y
 |---|---|
 | exit `0` | `compatible` |
 | `ABIDIFF_ABI_INCOMPATIBLE_CHANGE` (with or without `ABI_CHANGE`) | `incompatible` |
-| `ABIDIFF_ABI_CHANGE` only, report summary shows any `Removed` or `Changed` declarations | `incompatible` |
-| `ABIDIFF_ABI_CHANGE` only, report summary shows only `Added` declarations | `additions-only` |
+| `ABIDIFF_ABI_CHANGE` only, report summary shows any `Removed` declarations, or a `Changed` declaration with a reported sub-type change | `incompatible` |
+| `ABIDIFF_ABI_CHANGE` only, report summary shows only `Added` declarations (plus, at most, `Changed` declarations whose sub-type changes were all filtered) | `additions-only` |
 | `ABIDIFF_ABI_CHANGE` only, report unreadable / unclassifiable | `incompatible` (fail-safe, with a workflow warning) |
 | `ABIDIFF_ERROR` or `ABIDIFF_USAGE_ERROR` | `error` |
 
 The second stage parses the report's `… changes summary:` lines (e.g. `Functions changes summary: 0 Removed, 1 Changed, 0 Added function`), which is the only place `abidiff` distinguishes additions from modifications.
+
+A `Changed` declaration does not always carry a change `abidiff` was allowed to report. With suppressions in effect (for instance a `suppress_type` on `std::`), every function whose parameter type contains a suppressed change is still listed under "functions with some indirect sub-type change", but its whole detail block reads `type size hasn't changed` / `no data member change (1 filtered)`. The decoder scans each `[C]` block and only counts it as a modification when at least one concrete change line is present (`type name changed from …`, `type size changed from …`, a data member insertion, …). Filtered-only blocks are reported in the summary ("N changed declaration(s) carry only filtered sub-type changes") and leave the verdict at `additions-only`.
+
+**Symbols without debug info.** Suppression specs only reach declarations that have DWARF. ELF symbols that have none are compared by name only and listed as "function symbols not referenced by debug info"; a removed one sets `ABIDIFF_ABI_INCOMPATIBLE_CHANGE`. In C++ libraries these are typically libstdc++ template instantiations (`std::variant`, `std::function`, …) whose mangled names change whenever a template argument list changes, so a header-only change can look like a removed symbol. When both libraries are built with `-g`, set `unreferenced-symbols: 'false'` to leave them out (`--no-unreferenced-symbols`); keep the default for libraries without debug info, which would otherwise diff as empty.
 
 `fail-on` decides which verdicts cause the job to fail:
 
@@ -152,11 +157,11 @@ Compared:
 
 </details>
 
-<sub>Updated for commit abc1234 · suppressions: `.abignore`</sub>
+<sub>Updated for commit abc1234 · [check run](https://github.com/org/repo/actions/runs/1234) · suppressions: `.abignore`</sub>
 <!-- libabigail-action-marker:abi-check -->
 ````
 
-The trailing HTML marker line identifies the comment for find-and-update; rebases and force-pushes don't spam new comments.
+The footer links the check run that produced the verdict (its report artifacts hold the full `abidiff` output when the comment had to truncate it). The trailing HTML marker line identifies the comment for find-and-update; rebases and force-pushes don't spam new comments.
 If you run multiple ABI checks on a single PR (e.g. one per library), give each invocation a distinct `marker-suffix`.
 
 When the [`publish` sub-action](#fork-pull-requests) posts several libraries at once, the comment carries the **worst** verdict in its title, a per-library table, and one collapsible report per library:
@@ -362,6 +367,8 @@ libabigail-action/
 │   │   ├── v2_additions/      # adds a new symbol — additions-only
 │   │   ├── v3_breaking/       # changes parameter types — incompatible
 │   │   └── v4_changed/        # changes a return type — incompatible (exit bit 4 only)
+│   ├── reports/               # canned abidiff reports for the decoder tests
+│   ├── test-decode-verdict.sh # unit tests for decode-verdict.sh (bash test/test-decode-verdict.sh)
 │   ├── test-publish.js        # unit tests for post-comment.js (node test/test-publish.js)
 │   ├── workflow.yml           # copy-pasteable check workflow
 │   └── workflow-report.yml    # copy-pasteable workflow_run publisher for fork PRs

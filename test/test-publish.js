@@ -198,6 +198,35 @@ test('renderComment: backticks in names cannot break out of inline code', () => 
   assert.ok(body.includes('- Base: `a\'b.so`'));
 });
 
+test('runLink accepts plain http(s) URLs only', () => {
+  assert.strictEqual(mod.runLink('https://github.com/ros2/rclcpp/actions/runs/1'), 'https://github.com/ros2/rclcpp/actions/runs/1');
+  assert.strictEqual(mod.runLink(' https://example.com/x '), 'https://example.com/x');
+  assert.strictEqual(mod.runLink('javascript:alert(1)'), '');
+  assert.strictEqual(mod.runLink('https://example.com/a)b'), '');
+  assert.strictEqual(mod.runLink(''), '');
+  assert.strictEqual(mod.runLink(undefined), '');
+});
+
+test('runUrlFromContext builds the run URL from serverUrl and runId', () => {
+  assert.strictEqual(
+    mod.runUrlFromContext({ ...context(), serverUrl: 'https://github.com', runId: 42 }),
+    'https://github.com/ros2/rclcpp/actions/runs/42',
+  );
+  assert.strictEqual(mod.runUrlFromContext(context()), '');
+  assert.strictEqual(mod.runUrlFromContext(null), '');
+});
+
+test('renderComment: links the check run from the footer and the truncation note', () => {
+  const url = 'https://github.com/ros2/rclcpp/actions/runs/35040491153';
+  const { body } = mod.renderComment([entry({ report: 'x'.repeat(200000) })], { headSha: 'abc1234', runUrl: url });
+  assert.ok(body.includes(`<sub>Updated for commit abc1234 · [check run](${url})</sub>`));
+  assert.ok(body.includes(`(report truncated; the full report is in the check run artifacts: ${url})`));
+
+  const { body: plain } = mod.renderComment([entry()], { headSha: 'abc1234' });
+  assert.ok(plain.includes('<sub>Updated for commit abc1234</sub>'), 'no link without a run URL');
+  assert.ok(!plain.includes('check run'));
+});
+
 // ---------------------------------------------------------------------------
 // Artifact loading
 // ---------------------------------------------------------------------------
@@ -366,6 +395,46 @@ test('publishFromArtifacts: workflow_run for a fork PR aggregates bundles into o
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('publishFromArtifacts: links the check run, from RUN_URL or the workflow_run payload', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'libabigail-publish-'));
+  try {
+    writeBundle(root, 'abidiff-a', { library: 'liba.so', verdict: 'compatible', summary: 'ok' }, '');
+    const run = {
+      id: 1, head_sha: 'feed', head_branch: 'fix', head_repository: { owner: { login: 'someone' } },
+      html_url: 'https://github.com/ros2/rclcpp/actions/runs/1',
+    };
+    const github = fakeGithub({ prHead: 'feed', associated: [{ number: 3, state: 'open', head: { sha: 'feed' } }] });
+    await mod.publishFromArtifacts({ github, context: context({ payload: { workflow_run: run } }), core: fakeCore(), env: { VERDICTS_DIR: root } });
+    assert.ok(github.state.comments[0].body.includes('[check run](https://github.com/ros2/rclcpp/actions/runs/1)'), 'payload html_url');
+
+    const github2 = fakeGithub({ prHead: 'feed', associated: [{ number: 3, state: 'open', head: { sha: 'feed' } }] });
+    await mod.publishFromArtifacts({
+      github: github2, context: context({ payload: { workflow_run: run } }), core: fakeCore(),
+      env: { VERDICTS_DIR: root, RUN_URL: 'https://github.com/ros2/rclcpp/actions/runs/2' },
+    });
+    assert.ok(github2.state.comments[0].body.includes('[check run](https://github.com/ros2/rclcpp/actions/runs/2)'), 'RUN_URL wins');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('publishFromJob: links the current run from RUN_URL or the context', async () => {
+  const payload = { pull_request: { number: 7, head: { sha: 'abc1234', repo: { full_name: 'ros2/rclcpp' } } } };
+  const github = fakeGithub();
+  await mod.publishFromJob({
+    github, context: { ...context({ payload }), serverUrl: 'https://github.com', runId: 42 }, core: fakeCore(),
+    env: { VERDICT: 'compatible' },
+  });
+  assert.ok(github.state.comments[0].body.includes('[check run](https://github.com/ros2/rclcpp/actions/runs/42)'));
+
+  const github2 = fakeGithub();
+  await mod.publishFromJob({
+    github: github2, context: { ...context({ payload }), serverUrl: 'https://github.com', runId: 42 }, core: fakeCore(),
+    env: { VERDICT: 'compatible', RUN_URL: 'https://github.com/ros2/rclcpp/actions/runs/43' },
+  });
+  assert.ok(github2.state.comments[0].body.includes('[check run](https://github.com/ros2/rclcpp/actions/runs/43)'));
 });
 
 test('publishFromArtifacts: stale run does not overwrite a newer head', async () => {

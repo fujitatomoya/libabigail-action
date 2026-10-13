@@ -1,0 +1,39 @@
+Functions changes summary: 0 Removed (3 filtered out), 2 Changed (10 filtered out), 1 Added (5 filtered out) functions
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+Function symbols changes summary: 0 Removed, 2 Added function symbols not referenced by debug info
+Variable symbols changes summary: 0 Removed, 4 Added variable symbols not referenced by debug info
+
+1 Added function:
+
+  [A] 'function char* tracetools::get_symbol<void, const Foo_Request&, Foo_Response&>(std::function<void(const Foo_Request&, Foo_Response&)>)'    {_ZN10tracetools10get_symbolIvJRK11Foo_RequestR12Foo_ResponseEEEPcSt8functionIFT_DpT0_EE}
+
+2 functions with some indirect sub-type change:
+
+  [C] 'method void rclcpp::Service<Foo>::Service(std::shared_ptr<rcl_node_s>, const std::string&, rclcpp::AnyServiceCallback<Foo>, rcl_service_options_t&)' at service.hpp:260:1 has some indirect sub-type changes:
+    Please note that the symbol of this function is _ZN6rclcpp7ServiceI3FooEC2ESt10shared_ptrI10rcl_node_sERKSsNS_18AnyServiceCallbackIS1_EER21rcl_service_options_s
+     and it aliases symbol: _ZN6rclcpp7ServiceI3FooEC1ESt10shared_ptrI10rcl_node_sERKSsNS_18AnyServiceCallbackIS1_EER21rcl_service_options_s
+    implicit parameter 0 of type 'rclcpp::Service<Foo>*' has sub-type changes:
+      in pointed to type 'class rclcpp::Service<Foo>' at service.hpp:231:1:
+        type size hasn't changed
+        no base class change (1 filtered);
+        no member function changes (6 filtered);
+        no data member change (1 filtered);
+
+  [C] 'method void rclcpp::Service<Bar>::Service(std::shared_ptr<rcl_node_s>, const std::string&, rclcpp::AnyServiceCallback<Bar>, rcl_service_options_t&)' at service.hpp:260:1 has some indirect sub-type changes:
+    implicit parameter 0 of type 'rclcpp::Service<Bar>*' has sub-type changes:
+      in pointed to type 'class rclcpp::Service<Bar>' at service.hpp:231:1:
+        type size hasn't changed
+        no data member change (1 filtered);
+
+2 Added function symbols not referenced by debug info:
+
+  [A] _ZZN6rclcpp18AnyServiceCallbackI3FooE29register_callback_for_tracingEvENKUlOT_E_clIRSt8functionIFvRK11Foo_RequestR12Foo_ResponseEEEEDaS3_
+  [A] _ZZN6rclcpp18AnyServiceCallbackI3BarE29register_callback_for_tracingEvENKUlOT_E_clIRSt8functionIFvRK11Bar_RequestR12Bar_ResponseEEEEDaS3_
+
+4 Added variable symbols not referenced by debug info:
+
+  [A] _ZTIFvRK11Foo_RequestR12Foo_ResponseE
+  [A] _ZTIPFvRK11Foo_RequestR12Foo_ResponseE
+  [A] _ZTSFvRK11Foo_RequestR12Foo_ResponseE
+  [A] _ZTSPFvRK11Foo_RequestR12Foo_ResponseE
+

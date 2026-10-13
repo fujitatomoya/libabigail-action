@@ -34,6 +34,14 @@ jobs:
       - name: post-comment.js unit tests
         run: node test/test-publish.js
 
+  # Exit bitmap + canned abidiff reports (test/reports/) -> verdict.
+  unit-sh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: decode-verdict.sh unit tests
+        run: bash test/test-decode-verdict.sh
+
   fixtures-build:
     runs-on: ubuntu-latest
     steps:
@@ -153,6 +161,33 @@ jobs:
         run: |
           test "${{ steps.abi.outputs.verdict }}" = "incompatible"
 
+  # unreferenced-symbols: 'false' passes --no-unreferenced-symbols through to
+  # abidiff; the fixtures carry DWARF for every symbol, so the verdict is the
+  # same as with the default and the job only proves the flag is accepted.
+  verdict-no-unreferenced-symbols:
+    needs: fixtures-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixtures
+          path: build/
+      - name: Run libabigail-action (v1 vs v2, unreferenced-symbols=false)
+        id: abi
+        uses: ./
+        with:
+          base-lib: build/libfoo-v1.so
+          head-lib: build/libfoo-v2.so
+          unreferenced-symbols: 'false'
+          fail-on: incompatible
+          comment-pr: 'false'
+          report-name: abidiff-report-no-unreferenced-symbols
+      - name: Assert verdict == additions-only and the flag reached abidiff
+        run: |
+          test "${{ steps.abi.outputs.verdict }}" = "additions-only"
+          test "${{ steps.abi.outputs.exit-code }}" = "4"
+
   verdict-incompatible-fails:
     needs: fixtures-build
     runs-on: ubuntu-latest
@@ -191,6 +226,7 @@ jobs:
       - verdict-additions-only
       - verdict-incompatible
       - verdict-changed-incompatible
+      - verdict-no-unreferenced-symbols
       - verdict-incompatible-fails
     runs-on: ubuntu-latest
     steps:
@@ -210,7 +246,7 @@ jobs:
           PR: ${{ steps.publish.outputs.pr-number }}
         run: |
           echo "verdict=$VERDICT count=$COUNT pr-number=$PR"
-          test "$COUNT" = "5"
+          test "$COUNT" = "6"
           test "$VERDICT" = "incompatible"
           if [[ "$EVENT" == "pull_request" ]]; then
             test -n "$PR"

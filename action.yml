@@ -51,6 +51,16 @@ inputs:
     description: 'Display name of the library under test in comments and verdict.json; defaults to the head-lib file name.'
     required: false
     default: ''
+  unreferenced-symbols:
+    description: >-
+      Report changes to ELF symbols that have no debug info (abidiff's
+      default). Set to 'false' to pass --no-unreferenced-symbols: such symbols
+      are compared by name only, suppression specs cannot match them, and a
+      removed one (typically a libstdc++ template instantiation whose mangled
+      name changed) is counted as an incompatible change. Only turn this off
+      when both libraries are built with -g.
+    required: false
+    default: 'true'
   abidiff-extra-args:
     description: 'Extra arguments passed verbatim to abidiff.'
     required: false
@@ -142,6 +152,7 @@ runs:
         SUPPRESSIONS: ${{ inputs.suppressions }}
         HEADERS_DIR_BASE: ${{ inputs.headers-dir-base }}
         HEADERS_DIR_HEAD: ${{ inputs.headers-dir-head }}
+        UNREFERENCED_SYMBOLS: ${{ inputs.unreferenced-symbols }}
         FAIL_ON: ${{ inputs.fail-on }}
         EXTRA_ARGS: ${{ inputs.abidiff-extra-args }}
         REPORT_PATH: ${{ steps.paths.outputs.report-path }}
@@ -206,6 +217,9 @@ runs:
         LABEL_COMPAT: ${{ inputs.label-compat }}
         LABEL_BREAK: ${{ inputs.label-break }}
         COMMENT_PR: ${{ inputs.comment-pr }}
+        # Linked from the comment so readers can find the run (and its report
+        # artifacts) that produced the verdict.
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
